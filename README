@@ -1,0 +1,17 @@
+Places gnome shell extension by Nick Robinson
+(License: GPL v3)
+
+Lists your favourite folders in a menu for quick access.
+
+You can create a single level hierarchy by tagging top level folders like this : ===name===
+So, for example :
+
+===Home=== /home/nick/
+downloads /home/nick/downloads
+music /home/nick/music
+bin /home/nick/bin
+===Computer=== /
+bin /bin
+
+This way, you can have two "bin" folder favourites.
+
