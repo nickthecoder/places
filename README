@@ -1,17 +1,19 @@
 Places gnome shell extension by Nick Robinson
 (License: GPL v3)
 
-Lists your favourite folders in a menu for quick access.
+Lists favourite folders and files in a menu for quick access.
 
-You can create a single level hierarchy by tagging top level folders like this : ===name===
-So, for example :
+Out of the box, it will only list the Gnome favourite Places, however it can do more than that!
+It can list many sets of favourite places, with each set in its own sub-menu.
 
-===Home=== /home/nick/
-downloads /home/nick/downloads
-music /home/nick/music
-bin /home/nick/bin
-===Computer=== /
-bin /bin
+To create your own sets of places, create a folder :
 
-This way, you can have two "bin" folder favourites.
+    mkdir -p ~/.config/ntc-places
+    
+Now create as many text files in there, each containing the paths to folders and files.
+The name of the text file is used within the menu.
+
+If you want to use the standard Gnome favourite Places, then link to it like so :
+
+    ln -s ~/.config/gtk-3.0/bookmarks ~/.config/ntc-places/Gnome\ Places
 

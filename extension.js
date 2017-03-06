@@ -1,20 +1,26 @@
+const Clutter = imports.gi.Clutter;
 const Gdk = imports.gi.Gdk;
 const GLib = imports.gi.GLib;
 const Lang = imports.lang;
 const Shell = imports.gi.Shell;
 const St = imports.gi.St;
+const Gio = imports.gi.Gio;
 
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const Panel = imports.ui.panel;
 
-const ICON_SIZE = 22;
+// These constants can be customised as you see fit...
+const EDITOR = [ '/usr/bin/gedit', '-s' ];
+const EXTRA_PLACES_DIRECTORY = GLib.get_user_config_dir() + "/ntc-places";
+const DEFAULT_PLACES_FILE = GLib.get_user_config_dir() + "/gtk-3.0/bookmarks";
+// End of customisable constants.
 
 
 function myLog( message ) {
     // Comment out the line below when finished debugging
-    // global.logError( 'ntc places: ' + message );
+    global.logError( 'ntc places: ' + message );
 }
 
 
@@ -22,128 +28,164 @@ const PlaceMenuItem = new Lang.Class({
     Name: 'Places.PlaceMenuItem',
     Extends: PopupMenu.PopupBaseMenuItem,
 
-    _init: function( name, place ) {
+    _init: function( name, uri ) {
 	    this.parent();
-	    this.place = place;
+	    this.uri = uri;
 
         let box = new St.BoxLayout({ style_class: 'popup-combobox-item' });
 	    let label = new St.Label({ text: name });
-        let icon = place.iconFactory(ICON_SIZE);
-
-        box.add( icon );
+        // Could add an icon similar to the "Places Status Indicator" extension.
         box.add(label);
         
-        this.addActor(box);
-
+        this.actor.add(box);
     },
-
+    
+    launch: function() {
+        myLog( "Launching : " + this.uri );
+        let launchContext = global.create_app_launch_context(0,-1);
+        try {
+            Gio.app_info_launch_default_for_uri( this.uri, launchContext );
+        } catch (e) {
+            myLog( "!!!! Error launching : " + e );
+        }
+    },
+    
     activate: function(event) {
-        myLog( "Launching : " + this.place.name );
-        this.place.launch();
+        this.launch();
 	    this.parent(event);
     }
 });
 
 const PlacesMenu = new Lang.Class({
     Name: 'PlacesMenu.PlacesMenu',
-    Extends: PanelMenu.SystemStatusButton,
+    Extends: PanelMenu.Button,
 
     _init: function() {
         myLog( "***Init Places Menu***" );
-        
-        this.parent('folder');
-        // this.parent('user-bookmarks-symbolic');
+        this.parent(0.0, "Places");
+
+        let hbox = new St.BoxLayout({ style_class: 'panel-status-menu-box' });
+        let label = new St.Label({ text: _("Places"), y_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        hbox.add_child(label);
+        hbox.add_child(PopupMenu.arrowIcon(St.Side.BOTTOM));
+        this.actor.add_actor(hbox);
 
         this.bookmarksSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this.bookmarksSection);
-        this.mountsMenu = new PopupMenu.PopupSubMenuMenuItem("Removable Devices");
-        this.menu.addMenuItem(this.mountsMenu);
         
-        this.createBookmarksMenu();
-        this.createMountsMenu();
-
-        this.bookmarksHandler = Main.placesManager.connect('bookmarks-updated',Lang.bind(this,this.createBookmarksMenu));
-        this.mountsHandler = Main.placesManager.connect('mounts-updated',Lang.bind(this,this.createBoth));
-
-        Main.panel.addToStatusArea('ntc-places-menu', this);
+        this.buildPlacesMenu();
         
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        let me = this;
+        this.menu.addAction("Edit Places", function(event) {
+            me.editPlaces();
+	    });
+        this.menu.addAction("Reload", function(event) {
+            me.buildPlacesMenu();
+	    });
         myLog( "***Created Places Menu***" );
     },
-    
-    destroy: function() {
-        Main.placesManager.disconnect(this.bookmarksHandler);
-        Main.placesManager.disconnect(this.mountsHandler);
 
+    activate: function(event) {
+        myLog( "***ACTIVATING***" );
+    },
+
+    destroy: function() {
         this.parent();
     },
-    
-    // If there is a bookmark with a mount point, then it won't be valid when unmounted, but will become valid again
-    // when mounted, so we need to update both sections when a mount point is mounted/unmounted.
-    createBoth: function() {
-        myLog( "createBoth" );
-        // Workaround: gnome doesn't refresh the bookmarks when a drive is mounted/umounted.
-        Main.placesManager._reloadBookmarks();
-        
-        this.createBookmarksMenu();
-        this.createMountsMenu();
-    },
 
-    createBookmarksMenu : function() {
+    buildPlacesMenu : function()
+    {
+        this.placesFiles = [];
+        
         myLog( "Creating bookmarks menu" );
         this.bookmarksSection.removeAll();
+
+        this.addAdditionalPlaces( this.bookmarksSection, EXTRA_PLACES_DIRECTORY);
+    },
+    
+    addAdditionalPlaces: function( targetMenu, path )
+    {   
+        let iterator = null;
+        try {
+            let directory = Gio.file_new_for_path( path );
+            iterator = directory.enumerate_children( 'standard::name', 0, null );
+        } catch (e) {
+            // If we failed, then try to add the Gnome places
+            this.addPlaces( targetMenu, DEFAULT_PLACES_FILE );
+            return;
+        }
+        for ( let fileInfo = iterator.next_file( null ); fileInfo != null; fileInfo = iterator.next_file( null ) ) {
+            let name = fileInfo.get_attribute_as_string( 'standard::name' );
+            myLog( "Loading additional places : " + name );    
+            let subMenu = new PopupMenu.PopupSubMenuMenuItem( name );
+            myLog( "Sub Menu  "+  subMenu );
+            targetMenu.addMenuItem( subMenu );
+            this.addPlaces( subMenu.menu, path + "/" + name );
+        }
+        targetMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+    },
+    
+    addPlaces : function( targetMenu, path )
+    {
+        // Remember the file that we used, so that Edit Places can open it.
+        this.placesFiles[this.placesFiles.length] = path;
         
-        let bookmarks = Main.placesManager.getBookmarks();
-
-        let targetMenu = this.bookmarksSection;
-
-        for (let i = 0; i < bookmarks.length; i++) {
-            let place = bookmarks[i];
-            let isHeading = place.name[0] == '=';
-            let name = place.name.replace(/ *==* */g,""); // Remove all '=' symbols and and spaces left or right of them.
-            myLog( 'place: ' + name + " " + name[0] + " -> " + isHeading );
+        let contents = '';
+        try {
+            [success, contents] = GLib.file_get_contents( path );
+        } catch (e) {
+            myLog( 'Failed to load ' + path );
+            return;
+        }
+        let lines = ("" + contents).split(/\r?\n/);
+        for ( let i = 0; i < lines.length; i ++ ) {
+            let line = lines[i];
+            if ( line.trim() == "" ) continue;
             
-            if ( isHeading ) {
-                myLog( 'Submenu' );
-                let moreItems = new PopupMenu.PopupSubMenuMenuItem( name );
-                this.bookmarksSection.addMenuItem( moreItems );
-                targetMenu = moreItems.menu;
+            let name = line;
+            let path = line;
+            let space = line.indexOf(" ");
+            if (space < 0) {
+                let slash = line.lastIndexOf( "/" );
+                if ( slash > 0 ) {
+                    name = line.substring( slash + 1 );
+                }
+            } else {
+                name = line.substring( space + 1 );
+                path = line.substring( 0, space );
             }
-            
-            targetMenu.addMenuItem( new PlaceMenuItem( name, place ) );
+            if ( path.substring(0,1) == "/" ) {
+                path = "file://" + path;
+            } else if ( path.substring(0,1) == "~" ) {
+                // TODO I want to replace ~ with the users home directory, but the documentation for
+                // writing Gnome extensions is so bad, I can't work out how to do even this simple task.
+            }
+            myLog( "Place : '" + name + "' = '" + path + "'");
+            targetMenu.addMenuItem( new PlaceMenuItem( name, path ) );
         }
     },
 
-    createMountsMenu : function() {
-        myLog( "Creating mounts menu" );
-        this.mountsMenu.menu.removeAll();
+    editPlaces: function()
+    {
         
-        let mounts = Main.placesManager.getMounts();
-
-        for (let i = 0; i < mounts.length; i++) {
-            let mount = mounts[ i ];
-            
-            this.mountsMenu.menu.addMenuItem( new PlaceMenuItem( mount.name, mount ) );
-        }
-
-        if (mounts.length == 0)
-            this.mountsMenu.actor.hide();
-        else
-            this.mountsMenu.actor.show();
+        GLib.spawn_async(null, EDITOR.concat(this.placesFiles),
+            null,  GLib.SpawnFlags.DO_NOT_REAP_CHILD, null);
     },
-
 });
 
 function init() {
 }
 
-let myExtension;
+let placesMenu;
 
 function enable() {
-    myExtension = new PlacesMenu;
+    placesMenu = new PlacesMenu;
+    Main.panel.addToStatusArea('places-menu', placesMenu, 2, 'left');
 }
 
 function disable() {
-    myExtension.destroy();
-    myExtension = null;
+    placesMenu.destroy();
+    placesMenu = null;
 }
 
